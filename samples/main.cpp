@@ -68,26 +68,53 @@ static void DrawText(int x, int y, const char* string)
 
 static void DrawBody(Body* body)
 {
-	Mat22 R(body->rotation);
 	Vec2 x = body->position;
-	Vec2 h = 0.5f * body->width;
-
-	Vec2 v1 = x + R * Vec2(-h.x, -h.y);
-	Vec2 v2 = x + R * Vec2( h.x, -h.y);
-	Vec2 v3 = x + R * Vec2( h.x,  h.y);
-	Vec2 v4 = x + R * Vec2(-h.x,  h.y);
+	Mat22 R(body->rotation);
+	float h = body->GetH();
+	float r = body->GetR();
 
 	if (body == bomb)
 		glColor3f(0.4f, 0.9f, 0.4f);
 	else
 		glColor3f(0.8f, 0.8f, 0.9f);
 
-	glBegin(GL_LINE_LOOP);
-	glVertex2f(v1.x, v1.y);
-	glVertex2f(v2.x, v2.y);
-	glVertex2f(v3.x, v3.y);
-	glVertex2f(v4.x, v4.y);
+	if (body->mass == FLT_MAX)
+		glBegin(GL_POLYGON);
+	else
+		glBegin(GL_LINE_LOOP);
+	for (int i = 0; i <= 16; i++)
+	{
+		Vec2 v = x + R * Vec2(r * cosf(i * k_pi / 16.0f), 0.5f * h + r * sinf(i * k_pi / 16.0f));
+		glVertex2f(v.x, v.y);
+	}
+	for (int i = 0; i <= 16; i++)
+	{
+		Vec2 v = x + R * Vec2(-r * cosf(i * k_pi / 16.0f), -0.5f * h - r * sinf(i * k_pi / 16.0f));
+		glVertex2f(v.x, v.y);
+	}
 	glEnd();
+	
+	{
+		Vec2 h = Vec2(body->GetR(), body->GetR() + 0.5f * body->GetH());
+
+		Vec2 v1 = x + R * Vec2(-h.x, -h.y);
+		Vec2 v2 = x + R * Vec2(h.x, -h.y);
+		Vec2 v3 = x + R * Vec2(h.x, h.y);
+		Vec2 v4 = x + R * Vec2(-h.x, h.y);
+
+		if (body == bomb)
+			glColor3f(0.4f, 0.9f, 0.4f);
+		else
+			glColor3f(0.8f, 0.8f, 0.9f);
+
+		glBegin(GL_LINE_LOOP);
+		//glVertex2f(v1.x, v1.y);
+		//glVertex2f(v2.x, v2.y);
+		//glVertex2f(v3.x, v3.y);
+		//glVertex2f(v4.x, v4.y);
+		glEnd();
+
+	}
 }
 
 static void DrawJoint(Joint* joint)
@@ -118,7 +145,7 @@ static void LaunchBomb()
 	if (!bomb)
 	{
 		bomb = bodies + numBodies;
-		bomb->Set(Vec2(1.0f, 1.0f), 50.0f);
+		bomb->Set(Vec2(1.0f, 0.5f), 50.0f);
 		bomb->friction = 0.2f;
 		world.Add(bomb);
 		++numBodies;
@@ -133,84 +160,200 @@ static void LaunchBomb()
 // Single box
 static void Demo1(Body* b, Joint* j)
 {
-	b->Set(Vec2(100.0f, 20.0f), FLT_MAX);
-	b->position.Set(0.0f, -0.5f * b->width.y);
+	b->Set(Vec2(32.0f, 1.0f), FLT_MAX);
+	b->position.Set(0.0f, -1.0f);
+	b->rotation = 0.5f * k_pi;
 	world.Add(b);
 	++b; ++numBodies;
 
-	b->Set(Vec2(1.0f, 1.0f), 200.0f);
-	b->position.Set(0.0f, 4.0f);
+	b->Set(Vec2(2.0f, 1.0f), 200.0f);
+	b->position.Set(0.0f, 10.0f);
+	b->rotation = 0.5f * k_pi;
 	world.Add(b);
 	++b; ++numBodies;
 }
 
-// A simple pendulum
+// Pachinko  machine
 static void Demo2(Body* b, Joint* j)
 {
 	Body* b1 = b + 0;
-	b1->Set(Vec2(100.0f, 20.0f), FLT_MAX);
+	b1->Set(Vec2(28.0f, 1.0f), FLT_MAX);
 	b1->friction = 0.2f;
-	b1->position.Set(0.0f, -0.5f * b1->width.y);
-	b1->rotation = 0.0f;
+	b1->position.Set(0.0f, -1.0f);
+	b1->rotation = 0.5f * k_pi;
 	world.Add(b1);
 
 	Body* b2 = b + 1;
-	b2->Set(Vec2(1.0f, 1.0f), 100.0f);
+	b2->Set(Vec2(16.0f, 1.0f), FLT_MAX);
 	b2->friction = 0.2f;
-	b2->position.Set(9.0f, 11.0f);
-	b2->rotation = 0.0f;
+	b2->position.Set(-14.0f - 8.0f * tanf(k_pi / 32.0f), 7.0f);
+	b2->rotation = k_pi / 32.0f;
 	world.Add(b2);
 
-	numBodies += 2;
+	Body* b3 = b + 2;
+	b3->Set(Vec2(16.0f, 1.0f), FLT_MAX);
+	b3->friction = 0.2f;
+	b3->position.Set(14.0f + 8.0f * tanf(k_pi / 32.0f), 7.0f);
+	b3->rotation = -k_pi / 32.0f;
+	world.Add(b3);
 
-	j->Set(b1, b2, Vec2(0.0f, 11.0f));
-	world.Add(j);
+	Body* b4 = b + 3;
+	b4->Set(Vec2(0.0f, 1.0f), FLT_MAX);
+	b4->friction = 0.2f;
+	b4->position.Set(0.0f, 10.0f);
+	b4->rotation = 0.0f;
+	world.Add(b4);
 
-	numJoints += 1;
+	Body* b5 = b + 4;
+	b5->Set(Vec2(4.0f, 0.25f), FLT_MAX);
+	b5->friction = 0.2f;
+	b5->position.Set(-8.0f, 10.0f);
+	b5->rotation = -k_pi / 3.0f;
+	world.Add(b5);
+
+	Body* b6 = b + 5;
+	b6->Set(Vec2(4.0f, 0.25f), FLT_MAX);
+	b6->friction = 0.2f;
+	b6->position.Set(8.0f, 10.0f);
+	b6->rotation = k_pi / 3.0f;
+	world.Add(b6);
+
+	Body* b7 = b + 6;
+	b7->Set(Vec2(4.0f, 0.25f), FLT_MAX);
+	b7->friction = 0.2f;
+	b7->position.Set(-4.0f, 14.0f);
+	b7->rotation = k_pi / 3.0f;
+	world.Add(b7);
+
+	Body* b8 = b + 7;
+	b8->Set(Vec2(4.0f, 0.25f), FLT_MAX);
+	b8->friction = 0.2f;
+	b8->position.Set(4.0f, 14.0f);
+	b8->rotation = -k_pi / 3.0f;
+	world.Add(b8);
+
+	Body* b9 = b + 8;
+	b9->Set(Vec2(0.0f, 1.0f), FLT_MAX);
+	b9->friction = 0.2f;
+	b9->position.Set(-9.0f, 14.0f);
+	b9->rotation = 0.0f;
+	world.Add(b9);
+
+	Body* b10 = b + 9;
+	b10->Set(Vec2(0.0f, 1.0f), FLT_MAX);
+	b10->friction = 0.2f;
+	b10->position.Set(9.0f, 14.0f);
+	b10->rotation = 0.0f;
+	world.Add(b10);
+
+	Body* b11 = b + 10;
+	b11->Set(Vec2(2.75f, 0.25f), FLT_MAX);
+	b11->friction = 0.2f;
+	b11->position.Set(2.75f, 7.5f);
+	b11->rotation = -k_pi / 3.0f;
+	world.Add(b11);
+
+	Body* b12 = b + 11;
+	b12->Set(Vec2(2.75f, 0.25f), FLT_MAX);
+	b12->friction = 0.2f;
+	b12->position.Set(-2.75f, 7.5f);
+	b12->rotation = k_pi / 3.0f;
+	world.Add(b12);
+
+	numBodies += 12;
+
+	for (int i = 0; i < 9; ++i)
+	{
+		(b + 12 + i)->Set(Vec2(0.0f, 0.5f), FLT_MAX);
+		(b + 12 + i)->friction = 0.2f;
+		(b + 12 + i)->position.Set(-12.0f + 3.0f * i, 4.5f);
+		world.Add(b + 12 + i);
+		++numBodies;
+	}
+
+	for (int i = 0; i < 8; ++i)
+	{
+		(b + 21 + i)->Set(Vec2(0.0f, 0.5f), FLT_MAX);
+		(b + 21 + i)->friction = 0.2f;
+		(b + 21 + i)->position.Set(-10.5f + 3.0f * i, 2.5f);
+		world.Add(b + 21 + i);
+		++numBodies;
+	}
+
+	for (int j = 0; j < 12; ++j)
+	{
+		for (int i = 0; i < 8; ++i)
+		{
+			(b + 29 + i + 8 * j)->Set(Vec2(0.5f, 0.5f), 25.0f);
+			(b + 29 + i + 8 * j)->friction = 0.2f;
+			(b + 29 + i + 8 * j)->position.Set(-10.5f + 3.0f * i, 16.0f + j * 2.0f);
+			(b + 29 + i + 8 * j)->rotation = Random(-k_pi / 3.0f, k_pi / 3.0f);
+			world.Add(b + 29 + i + 8 * j);
+			++numBodies;
+		}
+	}
+
+	for (int j = 0; j < 2; ++j)
+	{
+		for (int i = 0; i < 8; ++i)
+		{
+			(b + 125 + i + 8 * j)->Set(Vec2(0.0f, 0.5f), 25.0f);
+			(b + 125 + i + 8 * j)->friction = 0.2f;
+			(b + 125 + i + 8 * j)->position.Set(-10.5f + 3.0f * i + Random(-0.5f, 0.5f), 40.0f + j * 2.0f);
+			world.Add(b + 125 + i + 8 * j);
+			++numBodies;
+		}
+	}
 }
 
 // Varying friction coefficients
 static void Demo3(Body* b, Joint* j)
 {
-	b->Set(Vec2(100.0f, 20.0f), FLT_MAX);
-	b->position.Set(0.0f, -0.5f * b->width.y);
+	b->Set(Vec2(32.0f, 1.0f), FLT_MAX);
+	b->position.Set(0.0f, -1.0f);
+	b->rotation = 0.5f * k_pi;
 	world.Add(b);
 	++b; ++numBodies;
 
-	b->Set(Vec2(13.0f, 0.25f), FLT_MAX);
-	b->position.Set(-2.0f, 11.0f);
-	b->rotation = -0.25f;
+	b->Set(Vec2(12.5f, 0.25f), FLT_MAX);
+	b->position.Set(-2.0f, 12.0f);
+	b->rotation = 0.5f * k_pi - 0.25f;
+	world.Add(b);
+	++b; ++numBodies;
+	
+	b->Set(Vec2(1.0f, 0.25f), FLT_MAX);
+	b->position.Set(6.25f, 10.5f);
+	world.Add(b);
+	++b; ++numBodies;
+	
+	b->Set(Vec2(12.5f, 0.25f), FLT_MAX);
+	b->position.Set(0.0f, 7.0f);
+	b->rotation = 0.5f * k_pi + 0.25f;
 	world.Add(b);
 	++b; ++numBodies;
 
-	b->Set(Vec2(0.25f, 1.0f), FLT_MAX);
-	b->position.Set(5.25f, 9.5f);
+	b->Set(Vec2(1.0f, 0.25f), FLT_MAX);
+	b->position.Set(-8.25f, 5.5f);
 	world.Add(b);
 	++b; ++numBodies;
 
-	b->Set(Vec2(13.0f, 0.25f), FLT_MAX);
-	b->position.Set(2.0f, 7.0f);
-	b->rotation = 0.25f;
+	b->Set(Vec2(12.5f, 0.25f), FLT_MAX);
+	b->position.Set(-2.0f, 2.0f);
+	b->rotation = 0.5f * k_pi - 0.25f;
 	world.Add(b);
 	++b; ++numBodies;
 
-	b->Set(Vec2(0.25f, 1.0f), FLT_MAX);
-	b->position.Set(-5.25f, 5.5f);
+	b->Set(Vec2(1.0f, 0.25f), FLT_MAX);
+	b->position.Set(16.0f, 0.5f+0.25f);
 	world.Add(b);
 	++b; ++numBodies;
-
-	b->Set(Vec2(13.0f, 0.25f), FLT_MAX);
-	b->position.Set(-2.0f, 3.0f);
-	b->rotation = -0.25f;
-	world.Add(b);
-	++b; ++numBodies;
-
+	
 	float friction[5] = {0.75f, 0.5f, 0.35f, 0.1f, 0.0f};
 	for (int i = 0; i < 5; ++i)
 	{
-		b->Set(Vec2(0.5f, 0.5f), 25.0f);
+		b->Set(Vec2(0.5f, 0.25f), 25.0f);
 		b->friction = friction[i];
-		b->position.Set(-7.5f + 2.0f * i, 14.0f);
+		b->position.Set(-7.5f + 2.0f * i, 16.0f);
 		world.Add(b);
 		++b; ++numBodies;
 	}
@@ -219,19 +362,22 @@ static void Demo3(Body* b, Joint* j)
 // A vertical stack
 static void Demo4(Body* b, Joint* j)
 {
-	b->Set(Vec2(100.0f, 20.0f), FLT_MAX);
+	b->Set(Vec2(32.0f, 1.0f), FLT_MAX);
 	b->friction = 0.2f;
-	b->position.Set(0.0f, -0.5f * b->width.y);
-	b->rotation = 0.0f;
+	b->position.Set(0.0f, -1.0f);
+	b->rotation = 0.5f * k_pi;
+	b->position.Set(0.0f, -1.0f * (b->GetR()));
+	b->rotation = 0.5f * k_pi;
 	world.Add(b);
 	++b; ++numBodies;
 
 	for (int i = 0; i < 10; ++i)
 	{
-		b->Set(Vec2(1.0f, 1.0f), 1.0f);
+		b->Set(Vec2(1.25f, 0.5f), 1.0f);
 		b->friction = 0.2f;
-		float x = Random(-0.1f, 0.1f);
-		b->position.Set(x, 0.51f + 1.05f * i);
+		float x = Random(-0.075f, 0.075f);
+		b->position.Set(x, 0.50f + 1.025f * i);
+		b->rotation = 0.5f * k_pi;
 		world.Add(b);
 		++b; ++numBodies;
 	}
@@ -240,14 +386,14 @@ static void Demo4(Body* b, Joint* j)
 // A pyramid
 static void Demo5(Body* b, Joint* j)
 {
-	b->Set(Vec2(100.0f, 20.0f), FLT_MAX);
+	b->Set(Vec2(32.0f, 1.0f), FLT_MAX);
 	b->friction = 0.2f;
-	b->position.Set(0.0f, -0.5f * b->width.y);
-	b->rotation = 0.0f;
+	b->position.Set(0.0f, -1.0f);
+	b->rotation = 0.5f * k_pi;
 	world.Add(b);
 	++b; ++numBodies;
 
-	Vec2 x(-6.0f, 0.75f);
+	Vec2 x(-5.5f * (1.75f + 0.125f), 0.75f);
 	Vec2 y;
 
 	for (int i = 0; i < 12; ++i)
@@ -256,17 +402,17 @@ static void Demo5(Body* b, Joint* j)
 
 		for (int j = i; j < 12; ++j)
 		{
-			b->Set(Vec2(1.0f, 1.0f), 10.0f);
+			b->Set(Vec2(0.95f, 0.4f), 10.0f);
 			b->friction = 0.2f;
 			b->position = y;
+			b->rotation = 0.5f * k_pi;
 			world.Add(b);
 			++b; ++numBodies;
 
-			y += Vec2(1.125f, 0.0f);
+			y += Vec2(1.75f + 0.125f, 0.0f);
 		}
 
-		//x += Vec2(0.5625f, 1.125f);
-		x += Vec2(0.5625f, 2.0f);
+		x += Vec2(0.5f * (1.75f + 0.125f), 0.8f + 0.125f);
 	}
 }
 
@@ -274,27 +420,29 @@ static void Demo5(Body* b, Joint* j)
 static void Demo6(Body* b, Joint* j)
 {
 	Body* b1 = b + 0;
-	b1->Set(Vec2(100.0f, 20.0f), FLT_MAX);
-	b1->position.Set(0.0f, -0.5f * b1->width.y);
+	b1->Set(Vec2(32.0f, 1.0f), FLT_MAX);
+	b1->position.Set(0.0f, -1.0f);
+	b1->rotation = 0.5f * k_pi;
 	world.Add(b1);
 
 	Body* b2 = b + 1;
-	b2->Set(Vec2(12.0f, 0.25f), 100.0f);
+	b2->Set(Vec2(11.75f, 0.125f), 100.0f);
 	b2->position.Set(0.0f, 1.0f);
+	b2->rotation = 0.5f * k_pi;
 	world.Add(b2);
 
 	Body* b3 = b + 2;
-	b3->Set(Vec2(0.5f, 0.5f), 25.0f);
+	b3->Set(Vec2(0.1f, 0.2f), 20.0f);
 	b3->position.Set(-5.0f, 2.0f);
 	world.Add(b3);
 
 	Body* b4 = b + 3;
-	b4->Set(Vec2(0.5f, 0.5f), 25.0f);
+	b4->Set(Vec2(0.1f, 0.2f), 20.0f);
 	b4->position.Set(-5.5f, 2.0f);
 	world.Add(b4);
 
 	Body* b5 = b + 4;
-	b5->Set(Vec2(1.0f, 1.0f), 100.0f);
+	b5->Set(Vec2(0.4f, 0.4f), 150.0f);
 	b5->position.Set(5.5f, 15.0f);
 	world.Add(b5);
 
@@ -309,10 +457,10 @@ static void Demo6(Body* b, Joint* j)
 // A suspension bridge
 static void Demo7(Body* b, Joint* j)
 {
-	b->Set(Vec2(100.0f, 20.0f), FLT_MAX);
+	b->Set(Vec2(32.0f, 1.0f), FLT_MAX);
 	b->friction = 0.2f;
-	b->position.Set(0.0f, -0.5f * b->width.y);
-	b->rotation = 0.0f;
+	b->position.Set(0.0f, -1.0f);
+	b->rotation = 0.5f * k_pi;
 	world.Add(b);
 	++b; ++numBodies;
 
@@ -321,16 +469,17 @@ static void Demo7(Body* b, Joint* j)
 
 	for (int i = 0; i < numPlanks; ++i)
 	{
-		b->Set(Vec2(1.0f, 0.25f), mass);
+		b->Set(Vec2(0.75f, 0.125f), mass);
 		b->friction = 0.2f;
 		b->position.Set(-8.5f + 1.25f * i, 5.0f);
+		b->rotation = 0.5f * k_pi;
 		world.Add(b);
 		++b; ++numBodies;
 	}
 
 	// Tuning
 	float frequencyHz = 2.0f;
-	float dampingRatio = 0.7f;
+	float dampingRatio = 0.75f;
 
 	// frequency in radians
 	float omega = 2.0f * k_pi * frequencyHz;
@@ -366,74 +515,78 @@ static void Demo7(Body* b, Joint* j)
 static void Demo8(Body* b, Joint* j)
 {
 	Body* b1 = b;
-	b->Set(Vec2(100.0f, 20.0f), FLT_MAX);
-	b->position.Set(0.0f, -0.5f * b->width.y);
+	b->Set(Vec2(32.0f, 1.0f), FLT_MAX);
+	b->position.Set(0.0f, -1.0f);
+	b->rotation = 0.5f * k_pi;
 	world.Add(b);
 	++b; ++numBodies;
 
-	b->Set(Vec2(12.0f, 0.5f), FLT_MAX);
+	b->Set(Vec2(11.5f, 0.25f), FLT_MAX);
 	b->position.Set(-1.5f, 10.0f);
+	b->rotation = 0.5f * k_pi;
 	world.Add(b);
 	++b; ++numBodies;
-
-	for (int i = 0; i < 10; ++i)
+	
+	for (int i = 0; i < 11; ++i)
 	{
-		b->Set(Vec2(0.2f, 2.0f), 10.0f);
-		b->position.Set(-6.0f + 1.0f * i, 11.125f);
+		b->Set(Vec2(1.8f, 0.1f), 10.0f);
+		b->position.Set(-6.5f + 1.0f * i, 11.125f);
 		b->friction = 0.1f;
 		world.Add(b);
 		++b; ++numBodies;
 	}
-
-	b->Set(Vec2(14.0f, 0.5f), FLT_MAX);
+	
+	b->Set(Vec2(13.5f, 0.25f), FLT_MAX);
 	b->position.Set(1.0f, 6.0f);
-	b->rotation = 0.3f;
+	b->rotation = 0.5f * k_pi + 0.3f;
 	world.Add(b);
 	++b; ++numBodies;
-
+	
 	Body* b2 = b;
-	b->Set(Vec2(0.5f, 3.0f), FLT_MAX);
+	b->Set(Vec2(2.5f, 0.25f), FLT_MAX);
 	b->position.Set(-7.0f, 4.0f);
 	world.Add(b);
 	++b; ++numBodies;
-
+	
 	Body* b3 = b;
-	b->Set(Vec2(12.0f, 0.25f), 20.0f);
+	b->Set(Vec2(11.75f, 0.125f), 20.0f);
 	b->position.Set(-0.9f, 1.0f);
+	b->rotation = 0.5f * k_pi;
 	world.Add(b);
 	++b; ++numBodies;
-
+	
 	j->Set(b1, b3, Vec2(-2.0f, 1.0f));
 	world.Add(j);
 	++j; ++numJoints;
-
+	
 	Body* b4 = b;
-	b->Set(Vec2(0.5f, 0.5f), 10.0f);
+	b->Set(Vec2(0.0f, 0.25f), 0.25f);
 	b->position.Set(-10.0f, 15.0f);
 	world.Add(b);
 	++b; ++numBodies;
-
+	
 	j->Set(b2, b4, Vec2(-7.0f, 15.0f));
 	world.Add(j);
 	++j; ++numJoints;
 
 	Body* b5 = b;
-	b->Set(Vec2(2.0f, 2.0f), 20.0f);
+	b->Set(Vec2(0.0f, 1.0f), 20.0f);
 	b->position.Set(6.0f, 2.5f);
 	b->friction = 0.1f;
 	world.Add(b);
 	++b; ++numBodies;
-
+	
 	j->Set(b1, b5, Vec2(6.0f, 2.6f));
 	world.Add(j);
 	++j; ++numJoints;
 
 	Body* b6 = b;
-	b->Set(Vec2(2.0f, 0.2f), 10.0f);
+	b->Set(Vec2(1.8f, 0.1f), 10.0f);
 	b->position.Set(6.0f, 3.6f);
+	b->rotation = 0.5f * k_pi;
 	world.Add(b);
 	++b; ++numBodies;
-
+	
 	j->Set(b5, b6, Vec2(7.0f, 3.5f));
 	world.Add(j);
 	++j; ++numJoints;
@@ -442,10 +595,10 @@ static void Demo8(Body* b, Joint* j)
 // A multi-pendulum
 static void Demo9(Body* b, Joint* j)
 {
-	b->Set(Vec2(100.0f, 20.0f), FLT_MAX);
+	b->Set(Vec2(32.0f, 1.0f), FLT_MAX);
 	b->friction = 0.2f;
-	b->position.Set(0.0f, -0.5f * b->width.y);
-	b->rotation = 0.0f;
+	b->position.Set(0.0f, -1.0f);
+	b->rotation = 0.5f * k_pi;
 	world.Add(b);
 
 	Body * b1 = b;
@@ -476,10 +629,10 @@ static void Demo9(Body* b, Joint* j)
 	for (int i = 0; i < 15; ++i)
 	{
 		Vec2 x(0.5f + i, y);
-		b->Set(Vec2(0.75f, 0.25f), mass);
+		b->Set(Vec2(0.5f, 0.125f), mass);
 		b->friction = 0.2f;
 		b->position = x;
-		b->rotation = 0.0f;
+		b->rotation = 0.5f * k_pi;
 		world.Add(b);
 
 		j->Set(b1, b, Vec2(float(i), y));
@@ -498,7 +651,7 @@ static void Demo9(Body* b, Joint* j)
 void (*demos[])(Body* b, Joint* j) = {Demo1, Demo2, Demo3, Demo4, Demo5, Demo6, Demo7, Demo8, Demo9};
 const char* demoStrings[] = {
 	"Demo 1: A Single Box",
-	"Demo 2: Simple Pendulum",
+	"Demo 2: Pachinko  machine",
 	"Demo 3: Varying Friction Coefficients",
 	"Demo 4: Randomized Stacking",
 	"Demo 5: Pyramid Stacking",
@@ -645,7 +798,7 @@ int main(int, char**)
 		glOrtho(-zoom, zoom, -zoom / aspect + pan_y, zoom / aspect + pan_y, -1.0, 1.0);
 	}
 
-	InitDemo(0);
+	InitDemo(1);
 
 	while (!glfwWindowShouldClose(mainWindow))
 	{

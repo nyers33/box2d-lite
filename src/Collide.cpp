@@ -12,318 +12,334 @@
 #include "box2d-lite/Arbiter.h"
 #include "box2d-lite/Body.h"
 
-// Box vertex and edge numbering:
+#include <limits>
+#include <cmath>
+#include <cfloat>
+
+// Capsule feature numbering:
 //
-//        ^ y
-//        |
-//        e1
-//   v2 ------ v1
-//    |        |
-// e2 |        | e4  --> x
-//    |        |
-//   v3 ------ v4
-//        e3
+//         ^ y
+//         |
+//         1
+//      /-----\
+//     /       \
+//    /         \
+//   |           |
+//   |           |
+//   |     0     | --> x
+//   |           |
+//   |           |
+//    \         /
+//     \       /
+//      \-----/
+//         -1
 
-enum Axis
+enum FeatureNumbers
 {
-	FACE_A_X,
-	FACE_A_Y,
-	FACE_B_X,
-	FACE_B_Y
+	NEG_Y = -1,
+	BODY,
+	POS_Y
 };
 
-enum EdgeNumbers
+void qrDecompGS(Mat22 mat, Mat22 matOut[2])
 {
-	NO_EDGE = 0,
-	EDGE1,
-	EDGE2,
-	EDGE3,
-	EDGE4
-};
+	Vec2 a1 = mat.col1;
+	Vec2 a2 = mat.col2;
 
-struct ClipVertex
-{
-	ClipVertex() { fp.value = 0; }
-	Vec2 v;
-	FeaturePair fp;
-};
+	Vec2 v1 = a1;
+	float v1Norm = v1.Length();
+	Vec2 e1 = (v1Norm > 1e-4) ? Normalize(v1) : Vec2(0.0f, 0.0f);
+	Vec2 v2 = a2 - Dot(a2, e1) * e1;
+	float v2Norm = v2.Length();
+	Vec2 e2 = (v2Norm > 1e-4) ? Normalize(v2) : Vec2(0.0f,0.0f);
 
-void Flip(FeaturePair& fp)
-{
-	Swap(fp.e.inEdge1, fp.e.inEdge2);
-	Swap(fp.e.outEdge1, fp.e.outEdge2);
+	matOut[0].col1 = e1;
+	matOut[0].col2 = e2;
+
+	matOut[1].col1.x = Dot(a1, e1);
+	matOut[1].col1.y = 0.0f;
+	matOut[1].col2.x = Dot(a2, e1);
+	matOut[1].col2.y = Dot(a2, e2);
 }
 
-int ClipSegmentToLine(ClipVertex vOut[2], ClipVertex vIn[2],
-					  const Vec2& normal, float offset, char clipEdge)
+float sqDistPointSeg(Vec2 a, Vec2 b, Vec2 c)
 {
-	// Start with no output points
-	int numOut = 0;
-
-	// Calculate the distance of end points to the line
-	float distance0 = Dot(normal, vIn[0].v) - offset;
-	float distance1 = Dot(normal, vIn[1].v) - offset;
-
-	// If the points are behind the plane
-	if (distance0 <= 0.0f) vOut[numOut++] = vIn[0];
-	if (distance1 <= 0.0f) vOut[numOut++] = vIn[1];
-
-	// If the points are on different sides of the plane
-	if (distance0 * distance1 < 0.0f)
+	Vec2 ab = b - a;
+	Vec2 ac = c - a;
+	Vec2 bc = c - b;
+	float e = Dot(ac, ab);
+	float f = Dot(ab, ab);
+	if (e < 0.0f)
 	{
-		// Find intersection point of edge and plane
-		float interp = distance0 / (distance0 - distance1);
-		vOut[numOut].v = vIn[0].v + interp * (vIn[1].v - vIn[0].v);
-		if (distance0 > 0.0f)
-		{
-			vOut[numOut].fp = vIn[0].fp;
-			vOut[numOut].fp.e.inEdge1 = clipEdge;
-			vOut[numOut].fp.e.inEdge2 = NO_EDGE;
-		}
-		else
-		{
-			vOut[numOut].fp = vIn[1].fp;
-			vOut[numOut].fp.e.outEdge1 = clipEdge;
-			vOut[numOut].fp.e.outEdge2 = NO_EDGE;
-		}
-		++numOut;
+		return Dot(ac, ac);
 	}
-
-	return numOut;
-}
-
-static void ComputeIncidentEdge(ClipVertex c[2], const Vec2& h, const Vec2& pos,
-								const Mat22& Rot, const Vec2& normal)
-{
-	// The normal is from the reference box. Convert it
-	// to the incident boxe's frame and flip sign.
-	Mat22 RotT = Rot.Transpose();
-	Vec2 n = -(RotT * normal);
-	Vec2 nAbs = Abs(n);
-
-	if (nAbs.x > nAbs.y)
+	else if ( e >= f )
 	{
-		if (Sign(n.x) > 0.0f)
-		{
-			c[0].v.Set(h.x, -h.y);
-			c[0].fp.e.inEdge2 = EDGE3;
-			c[0].fp.e.outEdge2 = EDGE4;
-
-			c[1].v.Set(h.x, h.y);
-			c[1].fp.e.inEdge2 = EDGE4;
-			c[1].fp.e.outEdge2 = EDGE1;
-		}
-		else
-		{
-			c[0].v.Set(-h.x, h.y);
-			c[0].fp.e.inEdge2 = EDGE1;
-			c[0].fp.e.outEdge2 = EDGE2;
-
-			c[1].v.Set(-h.x, -h.y);
-			c[1].fp.e.inEdge2 = EDGE2;
-			c[1].fp.e.outEdge2 = EDGE3;
-		}
+		return Dot(bc, bc);
 	}
 	else
 	{
-		if (Sign(n.y) > 0.0f)
-		{
-			c[0].v.Set(h.x, h.y);
-			c[0].fp.e.inEdge2 = EDGE4;
-			c[0].fp.e.outEdge2 = EDGE1;
+		return Dot(ac, ac) - e * e / f;
+	}
+}
 
-			c[1].v.Set(-h.x, h.y);
-			c[1].fp.e.inEdge2 = EDGE1;
-			c[1].fp.e.outEdge2 = EDGE2;
-		}
-		else
-		{
-			c[0].v.Set(-h.x, -h.y);
-			c[0].fp.e.inEdge2 = EDGE2;
-			c[0].fp.e.outEdge2 = EDGE3;
+Vec2 closestPtPointSeg(Vec2 a, Vec2 b, Vec2 c)
+{
+	Vec2 ab = b - a;
+	float t = Dot(c - a, ab) / Dot(ab, ab);
+	t = Clamp(t, 0.0f, 1.0f);
+	return a + t * ab;
 
-			c[1].v.Set(h.x, -h.y);
-			c[1].fp.e.inEdge2 = EDGE3;
-			c[1].fp.e.outEdge2 = EDGE4;
+}
+
+Vec2 parallelogramContainsPt(Vec2 o, Vec2 a, Vec2 b, Vec2 pt)
+{
+	Vec2 p = pt - o;
+	float denomAbs = Abs(a.x * b.y - a.y * b.x);
+
+	float mu, lambda;
+
+	mu = (p.x * b.y - p.y * b.x) / (a.x * b.y - a.y * b.x);
+	lambda = (p.x * a.y - p.y * a.x) / (a.y * b.x - a.x * b.y);
+
+	if ( denomAbs > 1e-4 && (0.0f <= mu && mu <= 1.0f && 0.0f <= lambda && lambda <= 1.0f) )
+	{
+		// inside
+		return pt;
+	}
+	else
+	{
+		// outside
+		Vec2 edgeList[4][2] = { { Vec2(0.0f, 0.0f), Vec2(a.x, a.y) }, { Vec2(a.x, a.y), Vec2(a.x, a.y) + Vec2(b.x, b.y) }, { Vec2(a.x, a.y) + Vec2(b.x, b.y), Vec2(b.x, b.y) }, { Vec2(b.x, b.y), Vec2(0.0f, 0.0f) } };
+		float minDistToEdge = std::numeric_limits<float>::max();
+		int iEdge = -1;
+		for (int i = 0; i < 4; i++)
+		{
+			float distToEdge = sqDistPointSeg(edgeList[i][0], edgeList[i][1], p);
+			if (distToEdge <= minDistToEdge)
+			{
+				minDistToEdge = distToEdge;
+				iEdge = i;
+			}
 		}
+
+		if (iEdge == -1)
+		{
+			int alma = 666;
+		}
+		return closestPtPointSeg(edgeList[iEdge][0], edgeList[iEdge][1], p) + o;
 	}
 
-	c[0].v = pos + Rot * c[0].v;
-	c[1].v = pos + Rot * c[1].v;
 }
 
 // The normal points from A to B
 int Collide(Contact* contacts, Body* bodyA, Body* bodyB)
 {
-	// Setup
-	Vec2 hA = 0.5f * bodyA->width;
-	Vec2 hB = 0.5f * bodyB->width;
-
 	Vec2 posA = bodyA->position;
 	Vec2 posB = bodyB->position;
-
 	Mat22 RotA(bodyA->rotation), RotB(bodyB->rotation);
 
-	Mat22 RotAT = RotA.Transpose();
-	Mat22 RotBT = RotB.Transpose();
+	Vec2 p1 = posA - 0.5f * bodyA->GetH() * RotA.col2; // seg0p0
+	Vec2 u1 = posA + 0.5f * bodyA->GetH() * RotA.col2; // seg0p1
 
-	Vec2 dp = posB - posA;
-	Vec2 dA = RotAT * dp;
-	Vec2 dB = RotBT * dp;
+	Vec2 p2 = posB - 0.5f * bodyB->GetH() * RotB.col2; // seg1p0
+	Vec2 u2 = posB + 0.5f * bodyB->GetH() * RotB.col2; // seg1p1
 
-	Mat22 C = RotAT * RotB;
-	Mat22 absC = Abs(C);
-	Mat22 absCT = absC.Transpose();
+	Vec2 s1 = u1 - p1;
+	Vec2 s2 = u2 - p2;
 
-	// Box A faces
-	Vec2 faceA = Abs(dA) - hA - absC * hB;
-	if (faceA.x > 0.0f || faceA.y > 0.0f)
+	float r1 = bodyA->GetR();
+	float r2 = bodyB->GetR();
+
+	Mat22 qrMat[2];
+	qrDecompGS(Mat22(s2, -s1), qrMat);
+
+	Vec2 parallelogramOrigin = qrMat[1] * Vec2(0.0f, 0.0f) + qrMat[0].Transpose() * (p2 - p1);
+	Vec2 parallelogramSideA = qrMat[1] * Vec2(1.0f, 0.0f) + qrMat[0].Transpose() * (p2 - p1) - parallelogramOrigin;
+	Vec2 parallelogramSideB = qrMat[1] * Vec2(0.0f, 1.0f) + qrMat[0].Transpose() * (p2 - p1) - parallelogramOrigin;
+
+	Vec2 opt = parallelogramContainsPt(parallelogramOrigin, parallelogramSideA, parallelogramSideB, Vec2(0.0f, 0.0f));
+	float sqDist = Dot(opt, opt) + Dot((p2 - p1), (p2 - p1)) - Dot((p2 - p1), qrMat[0] * qrMat[0].Transpose() * (p2 - p1));
+
+	if (sqDist < 0.0f) sqDist = 0.0f;
+
+	if ((bodyA->GetR() + bodyB->GetR()) * (bodyA->GetR() + bodyB->GetR()) < sqDist)
+	{
 		return 0;
-
-	// Box B faces
-	Vec2 faceB = Abs(dB) - absCT * hA - hB;
-	if (faceB.x > 0.0f || faceB.y > 0.0f)
-		return 0;
-
-	// Find best axis
-	Axis axis;
-	float separation;
-	Vec2 normal;
-
-	// Box A faces
-	axis = FACE_A_X;
-	separation = faceA.x;
-	normal = dA.x > 0.0f ? RotA.col1 : -RotA.col1;
-
-	const float relativeTol = 0.95f;
-	const float absoluteTol = 0.01f;
-
-	if (faceA.y > relativeTol * separation + absoluteTol * hA.y)
-	{
-		axis = FACE_A_Y;
-		separation = faceA.y;
-		normal = dA.y > 0.0f ? RotA.col2 : -RotA.col2;
 	}
 
-	// Box B faces
-	if (faceB.x > relativeTol * separation + absoluteTol * hB.x)
+	Vec2 rx = opt - qrMat[0].Transpose() * (p2 - p1);
+
+	float parallelTest = Abs(Abs(Dot(s1, s2)) - s1.Length() * s2.Length());
+
+	// line vs line nearest in point - not parallel
+	if (Abs(qrMat[1].col1.x) > 1e-4 && Abs(qrMat[1].col2.y) > 1e-4 && parallelTest > 1e-4)
 	{
-		axis = FACE_B_X;
-		separation = faceB.x;
-		normal = dB.x > 0.0f ? RotB.col1 : -RotB.col1;
+		float x1 = rx.y / qrMat[1].col2.y;
+		float x2 = (qrMat[1].col2.y * rx.x - qrMat[1].col2.x * rx.y) / (qrMat[1].col1.x * qrMat[1].col2.y);
+
+		if (x2 < 0.0f)
+			x2 = 0.0f;
+
+		FeaturePair fp;
+		if (x1 <= 0.0f + 1e-4)
+		{
+			fp.e.inFeature = NEG_Y;
+		}
+		else if (x1 >= 1.0f - 1e-4)
+		{
+			fp.e.inFeature = POS_Y;
+		}
+		else
+		{
+			fp.e.inFeature = BODY;
+		}
+		if (x2 <= 0.0f + 1e-4)
+		{
+			fp.e.outFeature = NEG_Y;
+		}
+		else if (x2 >= 1.0f - 1e-4)
+		{
+			fp.e.outFeature= POS_Y;
+		}
+		else
+		{
+			fp.e.outFeature = BODY;
+		}
+		Vec2 nContact = Normalize((p2 + x2 * s2) - (p1 + x1 * s1));
+		contacts[0].separation = sqrtf(sqDist) - r1 - r2;
+		contacts[0].normal = nContact;
+		contacts[0].position = 0.5f * (((p1 + x1 * s1) + r1 * nContact) + ((p2 + x2 * s2) - r2 * nContact));
+		contacts[0].feature = fp;
+		return 1;
 	}
 
-	if (faceB.y > relativeTol * separation + absoluteTol * hB.y)
+	float s1LenSqd = Dot(s1, s1);
+	float s2LenSqd = Dot(s2, s2);
+	
+	// point vs point
+	if (s1LenSqd < 1e-4 && s2LenSqd < 1e-4)
 	{
-		axis = FACE_B_Y;
-		separation = faceB.y;
-		normal = dB.y > 0.0f ? RotB.col2 : -RotB.col2;
+		FeaturePair fp;
+		fp.e.inFeature = BODY;
+		fp.e.outFeature = BODY;
+		Vec2 nContact = Normalize(p2 - p1);
+		contacts[0].separation = sqrtf(sqDist) - r1 - r2;
+		contacts[0].normal = nContact;
+		contacts[0].position = 0.5f * ((p1 + r1 * nContact) + (p2 - r2 * nContact));
+		contacts[0].feature = fp;
+		return 1;
 	}
 
-	// Setup clipping plane data based on the separating axis
-	Vec2 frontNormal, sideNormal;
-	ClipVertex incidentEdge[2];
-	float front, negSide, posSide;
-	char negEdge, posEdge;
-
-	// Compute the clipping lines and the line segment to be clipped.
-	switch (axis)
+	// line vs line - parallel lines
+	if (s1LenSqd * s2LenSqd > 1e-4)
 	{
-	case FACE_A_X:
-		{
-			frontNormal = normal;
-			front = Dot(posA, frontNormal) + hA.x;
-			sideNormal = RotA.col2;
-			float side = Dot(posA, sideNormal);
-			negSide = -side + hA.y;
-			posSide =  side + hA.y;
-			negEdge = EDGE3;
-			posEdge = EDGE1;
-			ComputeIncidentEdge(incidentEdge, hB, posB, RotB, frontNormal);
-		}
-		break;
+		float x1[2];
+		float x2[2];
+		FeaturePair fp;
+		Vec2 nContact;
 
-	case FACE_A_Y:
+		if (s1LenSqd > s2LenSqd)
 		{
-			frontNormal = normal;
-			front = Dot(posA, frontNormal) + hA.y;
-			sideNormal = RotA.col1;
-			float side = Dot(posA, sideNormal);
-			negSide = -side + hA.x;
-			posSide =  side + hA.x;
-			negEdge = EDGE2;
-			posEdge = EDGE4;
-			ComputeIncidentEdge(incidentEdge, hB, posB, RotB, frontNormal);
-		}
-		break;
+			x1[0] = Min(Max(Dot((1.0f / sqrtf(s1LenSqd)) * s1, p2 - p1) / sqrtf(s1LenSqd), 0.0f), 1.0f);
+			x1[1] = Min(Max(Dot((1.0f / sqrtf(s1LenSqd)) * s1, u2 - p1) / sqrtf(s1LenSqd), 0.0f), 1.0f);
 
-	case FACE_B_X:
-		{
-			frontNormal = -normal;
-			front = Dot(posB, frontNormal) + hB.x;
-			sideNormal = RotB.col2;
-			float side = Dot(posB, sideNormal);
-			negSide = -side + hB.y;
-			posSide =  side + hB.y;
-			negEdge = EDGE3;
-			posEdge = EDGE1;
-			ComputeIncidentEdge(incidentEdge, hA, posA, RotA, frontNormal);
-		}
-		break;
+			x2[0] = Min(Max(Dot((1.0f / sqrtf(s2LenSqd)) * s2, p1 - p2 + x1[0] * s1) / sqrtf(s2LenSqd), 0.0f), 1.0f);
+			x2[1] = Min(Max(Dot((1.0f / sqrtf(s2LenSqd)) * s2, p1 - p2 + x1[1] * s1) / sqrtf(s2LenSqd), 0.0f), 1.0f);
 
-	case FACE_B_Y:
-		{
-			frontNormal = -normal;
-			front = Dot(posB, frontNormal) + hB.y;
-			sideNormal = RotB.col1;
-			float side = Dot(posB, sideNormal);
-			negSide = -side + hB.x;
-			posSide =  side + hB.x;
-			negEdge = EDGE2;
-			posEdge = EDGE4;
-			ComputeIncidentEdge(incidentEdge, hA, posA, RotA, frontNormal);
 		}
-		break;
+		else
+		{
+			x2[0] = Min(Max(Dot((1.0f / sqrtf(s2LenSqd)) * s2, p1 - p2) / sqrtf(s2LenSqd), 0.0f), 1.0f);
+			x2[1] = Min(Max(Dot((1.0f / sqrtf(s2LenSqd)) * s2, u1 - p2) / sqrtf(s2LenSqd), 0.0f), 1.0f);
+
+			x1[0] = Min(Max(Dot((1.0f / sqrtf(s1LenSqd)) * s1, p2 - p1 + x2[0] * s2) / sqrtf(s1LenSqd), 0.0f), 1.0f);
+			x1[1] = Min(Max(Dot((1.0f / sqrtf(s1LenSqd)) * s1, p2 - p1 + x2[1] * s2) / sqrtf(s1LenSqd), 0.0f), 1.0f);
+		}
+
+		nContact = (p2 + 0.5f * (x2[0] + x2[1]) * s2) - (p1 + 0.5f * (x1[0] + x1[1]) * s1);
+		float nContactNorm = nContact.Length();
+		if (nContactNorm > 1e-4)
+			nContact *= (1.0f / nContactNorm);
+		else
+			nContact = Vec2(0.0f, 1.0f);
+		for (int i = 0; i < 2; ++i)
+		{
+			contacts[i].separation = sqrtf(sqDist) - r1 - r2;
+			contacts[i].normal = nContact;
+			contacts[i].position = (p1 + x1[i] * s1) + 0.5f * (r1 - r2 + sqrtf(sqDist)) * nContact;
+			fp.e.inFeature = BODY;
+			fp.e.outFeature = BODY;
+			contacts[i].feature = fp;
+		}
+		if (((x1[0] <= 0.0f + 1e-4 && x1[1] <= 0.0f + 1e-4) || (x1[0] >= 1.0f - 1e-4 && x1[1] >= 1.0f - 1e-4)) && ((x2[0] <= 0.0f + 1e-4 && x2[1] <= 0.0f + 1e-4) || (x2[0] >= 1.0f - 1e-4 && x2[1] >= 1.0f - 1e-4)))
+		{
+			fp.e.inFeature = BODY;
+			fp.e.outFeature = BODY;
+			contacts[0].feature = fp;
+			return 1;
+		}
+		else
+			return 2;
 	}
 
-	// clip other face with 5 box planes (1 face plane, 4 edge planes)
-
-	ClipVertex clipPoints1[2];
-	ClipVertex clipPoints2[2];
-	int np;
-
-	// Clip to box side 1
-	np = ClipSegmentToLine(clipPoints1, incidentEdge, -sideNormal, negSide, negEdge);
-
-	if (np < 2)
-		return 0;
-
-	// Clip to negative box side 1
-	np = ClipSegmentToLine(clipPoints2, clipPoints1,  sideNormal, posSide, posEdge);
-
-	if (np < 2)
-		return 0;
-
-	// Now clipPoints2 contains the clipping points.
-	// Due to roundoff, it is possible that clipping removes all points.
-
-	int numContacts = 0;
-	for (int i = 0; i < 2; ++i)
+	// line vs point
 	{
-		float separation = Dot(frontNormal, clipPoints2[i].v) - front;
+		float x1[2];
+		float x2[2];
+		FeaturePair fp;
+		Vec2 nContact;
 
-		if (separation <= 0)
+		if (s1LenSqd > s2LenSqd)
 		{
-			contacts[numContacts].separation = separation;
-			contacts[numContacts].normal = normal;
-			// slide contact point onto reference face (easy to cull)
-			contacts[numContacts].position = clipPoints2[i].v - separation * frontNormal;
-			contacts[numContacts].feature = clipPoints2[i].fp;
-			if (axis == FACE_B_X || axis == FACE_B_Y)
-				Flip(contacts[numContacts].feature);
-			++numContacts;
-		}
-	}
+			x1[0] = Min(Max(Dot((1.0f / sqrtf(s1LenSqd)) * s1, p2 - p1) / sqrtf(s1LenSqd), 0.0f), 1.0f);
+			x1[1] = Min(Max(Dot((1.0f / sqrtf(s1LenSqd)) * s1, u2 - p1) / sqrtf(s1LenSqd), 0.0f), 1.0f);
 
-	return numContacts;
+			x2[0] = 0.0f;
+			x2[1] = 1.0f;
+
+			if (x1[0] == 0.0f)
+			{
+				fp.e.inFeature = NEG_Y;
+			}
+			else if (x1[0] == 1.0f)
+			{
+				fp.e.inFeature = POS_Y;
+			}
+			else
+			{
+				fp.e.inFeature = BODY;
+			}
+			fp.e.outFeature = BODY;
+		}
+		else
+		{
+			x1[0] = 0.0f;
+			x1[1] = 1.0f;
+
+			x2[0] = Min(Max(Dot((1.0f / sqrtf(s2LenSqd)) * s2, p1 - p2) / sqrtf(s2LenSqd), 0.0f), 1.0f);
+			x2[1] = Min(Max(Dot((1.0f / sqrtf(s2LenSqd)) * s2, u1 - p2) / sqrtf(s2LenSqd), 0.0f), 1.0f);
+
+			if (x2[0] == 0.0f)
+			{
+				fp.e.outFeature = NEG_Y;
+			}
+			else if (x2[0] == 1.0f)
+			{
+				fp.e.outFeature = POS_Y;
+			}
+			else
+			{
+				fp.e.outFeature = BODY;
+			}
+			fp.e.inFeature = BODY;
+		}
+
+		nContact = Normalize((p2 + Vec2(x2[0] * s2.x, x2[1] * s2.y)) - (p1 + Vec2(x1[0] * s1.x, x1[1] * s1.y)));
+		contacts[0].separation = sqrtf(sqDist) - r1 - r2;
+		contacts[0].normal = nContact;
+		contacts[0].position = (p1 + Vec2(x1[0] * s1.x, x1[1] * s1.y)) + 0.5f * (r1 - r2 + sqrtf(sqDist)) * nContact;
+		contacts[0].feature = fp;
+		return 1;
+	}
 }

@@ -17,7 +17,9 @@
 struct Body
 {
 	Body();
-	void Set(const Vec2& w, float m);
+	void Set(const Vec2& dim, float m);
+	float GetH() { return dim.x; }
+	float GetR() { return dim.y; }
 
 	void AddForce(const Vec2& f)
 	{
@@ -33,7 +35,7 @@ struct Body
 	Vec2 force;
 	float torque;
 
-	Vec2 width;
+	Vec2 dim; // dimensions (height & radius)
 
 	float friction;
 	float mass, invMass;

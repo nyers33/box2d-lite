@@ -1,3 +1,8 @@
+# Box2D-Lite with Capsules
+Box collision handling replaced with Capsule. Implementation based on [minimum distance between line segments with QR factorization](https://github.com/nyers33/capsule_contact).
+
+<p align="center"><img src="capsule2D.png" width="600" /></p>
+
 # Box2D-Lite
 Box2D-Lite is a small 2D physics engine. It was developed for the [2006 GDC Physics Tutorial](docs/GDC2006_Catto_Erin_PhysicsTutorial.pdf). This is the original version of the larger [Box2D](https://box2d.org) library. The Lite version is more suitable for learning about game physics.
 

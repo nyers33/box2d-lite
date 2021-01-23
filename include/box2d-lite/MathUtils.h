@@ -143,6 +143,12 @@ inline Vec2 Abs(const Vec2& a)
 	return Vec2(fabsf(a.x), fabsf(a.y));
 }
 
+inline Vec2 Normalize(const Vec2& a)
+{
+	float l = a.Length();
+	return Vec2(a.x / l, a.y / l);
+}
+
 inline Mat22 Abs(const Mat22& A)
 {
 	return Mat22(Abs(A.col1), Abs(A.col2));
